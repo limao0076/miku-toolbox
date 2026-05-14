@@ -1,0 +1,53 @@
+#!/usr/bin/env python3
+"""初音GitHub助手 v2 - 支持GET/POST/PUT/DELETE"""
+import sys, os, json, base64, urllib.request
+from hashlib import sha256
+
+VAULT = os.path.expanduser('~/.hermes-vault/credentials.json')
+SALT = os.path.expanduser('~/.hermes-vault/.salt')
+
+def get_token():
+    with open(SALT, 'rb') as f: salt = f.read()
+    key = sha256(b'hermes@2026' + salt).digest()
+    with open(VAULT, 'rb') as f:
+        enc = base64.b64decode(f.read())
+    plain = bytes(d ^ key[i % len(key)] for i, d in enumerate(enc))
+    data = json.loads(plain.decode())
+    return data['github_token']['password']
+
+def api(url, method='GET', data=None):
+    token = get_token()
+    req = urllib.request.Request(url, method=method)
+    req.add_header('Authorization', f'token {token}')
+    req.add_header('Accept', 'application/vnd.github.v3+json')
+    req.add_header('User-Agent', 'miku-gh/2.0')
+    if data is not None:
+        req.add_header('Content-Type', 'application/json')
+        body = json.dumps(data).encode()
+    else:
+        body = None
+    try:
+        resp = urllib.request.urlopen(req, data=body, timeout=15)
+        return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as e:
+        err = e.read().decode()
+        print(f"HTTP {e.code}: {e.reason}", file=sys.stderr)
+        print(err, file=sys.stderr)
+        return None
+
+if __name__ == '__main__':
+    if len(sys.argv) < 2:
+        print("用法: miku-gh <URL> [method] [json_data]")
+        print("示例:")
+        print("  miku-gh https://api.github.com/user")
+        print("  miku-gh https://api.github.com/user/starred/NousResearch/hermes-agent PUT")
+        print("  miku-gh https://api.github.com/user/repos POST '{\"name\":\"test\"}'")
+        sys.exit(1)
+    
+    url = sys.argv[1]
+    method = sys.argv[2].upper() if len(sys.argv) > 2 else 'GET'
+    data = json.loads(sys.argv[3]) if len(sys.argv) > 3 else None
+    
+    result = api(url, method, data)
+    if result:
+        print(json.dumps(result, ensure_ascii=False, indent=2))
